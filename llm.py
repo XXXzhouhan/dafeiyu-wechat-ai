@@ -57,7 +57,7 @@ class LLM:
     def endpoint(self):
         return self.base_url + "/chat/completions"
 
-    def chat(self, messages, model=None, retries=2):
+    def chat_message(self, messages, model=None, retries=2, tools=None, tool_choice=None):
         if not self.api_key:
             raise LLMError("API Key 为空，请检查 .env 或 config.py")
 
@@ -69,6 +69,10 @@ class LLM:
         }
         if self.thinking:
             payload["thinking"] = {"type": self.thinking}
+        if tools:
+            payload["tools"] = tools
+            if tool_choice is not None:
+                payload["tool_choice"] = tool_choice
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -89,14 +93,17 @@ class LLM:
                     raise LLMError(f"HTTP {resp.status_code}: {resp.text[:300]}")
 
                 data = resp.json()
-                content = data["choices"][0]["message"]["content"]
-                return (content or "").strip()
+                return data["choices"][0]["message"]
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
                 if attempt < retries:
                     time.sleep(1.5 * (attempt + 1))
 
         raise LLMError(f"调用模型失败：{last_error}")
+
+    def chat(self, messages, model=None, retries=2):
+        message = self.chat_message(messages, model=model, retries=retries)
+        return (message.get("content") or "").strip()
 
     def history_messages(self, system_prompt, history, bot_name):
         messages = [{"role": "system", "content": system_prompt.format(bot_name=bot_name)}]

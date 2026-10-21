@@ -42,13 +42,17 @@ TRIGGER_BY_NAME = True
 FOLLOW_UP_SECONDS = 120
 # 一次触发最多连续追问几轮
 FOLLOW_UP_TURNS = 3
-# 追问里至少出现这些信号之一才接话，避免机器人抢别人的话
+# 追问的保底关键词（模型判断不可用时使用；太弱的词会被代码忽略）
 FOLLOW_UP_HINTS = [
     "你", "为啥", "为什么", "怎么", "然后", "还有", "继续", "不对", "不是",
     "所以", "真的", "吗", "帮我", "再来", "换个", "说说", "解释", "啥意思",
     "行不行", "可以吗", "累", "困", "饿", "开心", "难过", "笑死", "好耶",
     "无语", "服了", "确实", "哈哈",
 ]
+# 追问前先用模型判断“这句话是在对 AI 说，还是在对别人说”；不确定会不接
+FOLLOW_UP_INTENT_LLM = True
+# 群里其他人插话后，结束当前自动追问；想继续请重新 @/叫名字
+FOLLOW_UP_BLOCK_ON_OTHER = True
 
 # 回复时是否 @ 提问的人；smart 模式下只有对方明确 @ 时才带 @，叫名字/追问不带
 REPLY_WITH_AT = True
@@ -102,7 +106,7 @@ AUTO_CAPTURE_IMAGE_KEY = True
 # 本地Ollama: http://localhost:11434/v1        qwen2.5:7b
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
+LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-flash")
 LLM_TIMEOUT = 120
 LLM_TEMPERATURE = 0.4
 
@@ -112,6 +116,25 @@ VISION_BASE_URL = os.getenv("VISION_BASE_URL", LLM_BASE_URL)
 VISION_API_KEY = os.getenv("VISION_API_KEY", "")
 VISION_MODEL = os.getenv("VISION_MODEL", "deepseek-flash")
 VISION_MAX_SIDE = 1600
+
+# ============ 联网搜索（DeepSeek Search / Fetch API）============
+# 和聊天共用 LLM_API_KEY，不需要另外申请搜索 key
+SEARCH_ENABLE = True
+# 每次搜索取几条结果（1-8）
+SEARCH_MAX_RESULTS = 6
+# 搜索/抓网页请求超时（秒）
+SEARCH_TIMEOUT = 20
+# 同一搜索词缓存多久（秒），避免群里连续问同一件事反复搜
+SEARCH_CACHE_SECONDS = 600
+# 最多让模型连续调用几轮工具（搜索 + 抓网页）
+SEARCH_MAX_TOOL_ROUNDS = 2
+# 一次回答里最多搜几次、抓几个网页
+SEARCH_MAX_SEARCHES = 2
+SEARCH_MAX_FETCH = 2
+# 抓网页后最多保留多少字给模型
+SEARCH_FETCH_CHARS = 6000
+# 带来源的搜索回答最多多少字（普通回答仍用 MAX_REPLY_CHARS）
+SEARCH_MAX_REPLY_CHARS = 700
 
 SYSTEM_PROMPT = """你在微信群里扮演「{bot_name}」，群友会叫你名字、@ 你，或者接着你的话往下问各种实际问题，不是客服。
 

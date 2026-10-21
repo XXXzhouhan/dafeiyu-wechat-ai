@@ -21,6 +21,41 @@ LOG_FILE = os.path.join(PROJECT_DIR, "bot.log")
 ERR_FILE = os.path.join(PROJECT_DIR, "bot_err.log")
 STATE_FILE = os.path.join(PROJECT_DIR, "app_state.json")
 
+FONT_NAME = "Microsoft YaHei UI"
+BG = "#F3F7FB"
+CARD = "#FFFFFF"
+SIDEBAR = "#0E2238"
+SIDEBAR_ACTIVE = "#1B3B5C"
+PRIMARY = "#2D6FDD"
+PRIMARY_DARK = "#225BC0"
+AQUA = "#2EC4B6"
+TEXT = "#142033"
+MUTED = "#6B7A90"
+BORDER = "#DCE5F0"
+SUCCESS = "#1F7D54"
+DANGER = "#C2413B"
+WARN = "#9A5B00"
+
+NAV_ITEMS = [
+    ("basic", "01   基础"),
+    ("model", "02   模型"),
+    ("persona", "03   人设"),
+    ("meme", "04   热梗"),
+    ("sticker", "05   表情包"),
+    ("run", "06   运行"),
+    ("log", "07   日志"),
+]
+
+PAGE_META = {
+    "basic": ("基础设置", "群、触发方式、回复长度和图片处理"),
+    "model": ("模型与视觉", "文本模型、视觉模型和接口 Key"),
+    "persona": ("人设", "傲娇鲸鱼娘的语气、边界和示例"),
+    "meme": ("热梗语料", "联网搜集、AI 梗占比和语料库维护"),
+    "sticker": ("表情包", "自然发送、识别群友表情和素材库"),
+    "run": ("运行策略", "暂停、窗口、性能和自动启动"),
+    "log": ("运行日志", "实时查看 bot.log，排查启动和发送问题"),
+}
+
 CONFIG_KEYS = [
     "GROUPS",
     "BOT_NAMES",
@@ -330,6 +365,39 @@ def sticker_stats():
     return count, len(tags)
 
 
+class ScrollFrame(tk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent, bg=BG)
+        self.canvas = tk.Canvas(self, bg=BG, highlightthickness=0)
+        self.scroll = ttk.Scrollbar(
+            self, orient="vertical", command=self.canvas.yview, style="Vertical.TScrollbar"
+        )
+        self.inner = tk.Frame(self.canvas, bg=BG)
+        self.window = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self.inner.bind("<Configure>", self._on_inner)
+        self.canvas.bind("<Configure>", self._on_canvas)
+        self.canvas.configure(yscrollcommand=self.scroll.set)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scroll.pack(side="right", fill="y")
+        self.canvas.bind("<Enter>", self._bind_wheel)
+        self.canvas.bind("<Leave>", self._unbind_wheel)
+
+    def _on_inner(self, _event):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas(self, event):
+        self.canvas.itemconfigure(self.window, width=event.width)
+
+    def _bind_wheel(self, _event):
+        self.canvas.bind_all("<MouseWheel>", self._wheel)
+
+    def _unbind_wheel(self, _event):
+        self.canvas.unbind_all("<MouseWheel>")
+
+    def _wheel(self, event):
+        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+
 class AssistantApp:
     def __init__(self, root):
         self.root = root
@@ -347,8 +415,15 @@ class AssistantApp:
         self.auto_start_var = tk.BooleanVar(value=self.state.get("auto_start", True))
 
         self.root.title("大肥鱼 · 傲娇鲸鱼娘")
-        self.root.geometry("1040x820")
         self.root.minsize(900, 700)
+        self.root.update_idletasks()
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        width = min(1040, max(900, screen_w - 80))
+        height = min(820, max(700, screen_h - 80))
+        x = max(0, (screen_w - width) // 2)
+        y = max(0, (screen_h - height) // 2 - 20)
+        self.root.geometry("{}x{}+{}+{}".format(width, height, x, y))
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self._setup_style()
         self._build_ui()
@@ -359,71 +434,367 @@ class AssistantApp:
             self.root.after(1200, lambda: self.start_bot(quiet=True))
 
     def _setup_style(self):
+        self.root.configure(bg=BG)
         style = ttk.Style()
         try:
-            style.theme_use("vista")
+            style.theme_use("clam")
         except Exception:
             pass
-        try:
-            self.root.option_add("*Font", ("Microsoft YaHei UI", 10))
-        except Exception:
-            pass
+        style.configure(".", font=(FONT_NAME, 10), background=BG, foreground=TEXT)
+        style.configure("TFrame", background=BG)
+        style.configure("Card.TFrame", background=CARD)
+        style.configure("TLabel", background=BG, foreground=TEXT)
+        style.configure("Card.TLabel", background=CARD, foreground=TEXT)
+        style.configure("Field.TLabel", background=CARD, foreground=TEXT, font=(FONT_NAME, 9))
+        style.configure("CardTitle.TLabel", background=CARD, foreground=PRIMARY, font=(FONT_NAME, 11, "bold"))
+        style.configure("Hint.TLabel", background=CARD, foreground=MUTED, font=(FONT_NAME, 9))
+        style.configure("PageTitle.TLabel", background=BG, foreground=TEXT, font=(FONT_NAME, 19, "bold"))
+        style.configure("PageSub.TLabel", background=BG, foreground=MUTED, font=(FONT_NAME, 9))
+        style.configure(
+            "TEntry",
+            fieldbackground="#FFFFFF",
+            foreground=TEXT,
+            bordercolor=BORDER,
+            lightcolor=BORDER,
+            darkcolor=BORDER,
+            padding=6,
+        )
+        style.map(
+            "TEntry",
+            bordercolor=[("focus", PRIMARY)],
+            lightcolor=[("focus", PRIMARY)],
+            darkcolor=[("focus", PRIMARY)],
+        )
+        style.configure(
+            "TCombobox",
+            fieldbackground="#FFFFFF",
+            background="#FFFFFF",
+            foreground=TEXT,
+            arrowcolor=MUTED,
+            bordercolor=BORDER,
+            padding=5,
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", "#FFFFFF")],
+            bordercolor=[("focus", PRIMARY)],
+        )
+        style.configure("Card.TCheckbutton", background=CARD, foreground=TEXT, font=(FONT_NAME, 9))
+        style.map("Card.TCheckbutton", background=[("active", CARD)])
+        style.configure(
+            "Accent.TButton",
+            background=PRIMARY,
+            foreground="#FFFFFF",
+            borderwidth=0,
+            padding=(16, 9),
+            font=(FONT_NAME, 10, "bold"),
+        )
+        style.map(
+            "Accent.TButton",
+            background=[("active", PRIMARY_DARK), ("disabled", "#A9BDD9")],
+            foreground=[("disabled", "#F7FAFF")],
+        )
+        style.configure(
+            "Ghost.TButton",
+            background=CARD,
+            foreground=PRIMARY,
+            bordercolor=BORDER,
+            lightcolor=BORDER,
+            darkcolor=BORDER,
+            borderwidth=1,
+            padding=(12, 8),
+            font=(FONT_NAME, 9),
+        )
+        style.map(
+            "Ghost.TButton",
+            background=[("active", "#EEF4FC"), ("disabled", "#F3F6FA")],
+            foreground=[("disabled", "#A6B4C5")],
+            bordercolor=[("active", PRIMARY)],
+        )
+        style.configure(
+            "Danger.TButton",
+            background=CARD,
+            foreground=DANGER,
+            bordercolor="#F2C9C7",
+            lightcolor="#F2C9C7",
+            darkcolor="#F2C9C7",
+            borderwidth=1,
+            padding=(12, 8),
+            font=(FONT_NAME, 9),
+        )
+        style.map(
+            "Danger.TButton",
+            background=[("active", "#FDECEC"), ("disabled", "#F3F6FA")],
+            foreground=[("disabled", "#C9A5A3")],
+        )
+        style.configure(
+            "Nav.TButton",
+            background=SIDEBAR,
+            foreground="#B9CCE2",
+            borderwidth=0,
+            anchor="w",
+            padding=(18, 11),
+            font=(FONT_NAME, 9),
+        )
+        style.map(
+            "Nav.TButton",
+            background=[("active", SIDEBAR_ACTIVE)],
+            foreground=[("active", "#FFFFFF")],
+        )
+        style.configure(
+            "NavActive.TButton",
+            background=SIDEBAR_ACTIVE,
+            foreground="#FFFFFF",
+            borderwidth=0,
+            anchor="w",
+            padding=(18, 11),
+            font=(FONT_NAME, 9, "bold"),
+        )
+        style.map(
+            "NavActive.TButton",
+            background=[("active", SIDEBAR_ACTIVE)],
+            foreground=[("active", "#FFFFFF")],
+        )
+        style.configure(
+            "Vertical.TScrollbar",
+            background="#C7D6E6",
+            troughcolor=BG,
+            bordercolor=BG,
+            arrowcolor=MUTED,
+        )
+        style.map("Vertical.TScrollbar", background=[("active", "#AFC4DD")])
+        self.root.option_add("*TCombobox*Listbox.background", CARD)
+        self.root.option_add("*TCombobox*Listbox.foreground", TEXT)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", PRIMARY)
+        self.root.option_add("*TCombobox*Listbox.selectForeground", "#FFFFFF")
 
     def _build_ui(self):
-        header = ttk.Frame(self.root)
-        header.pack(fill="x", padx=12, pady=(10, 6))
-        ttk.Label(header, text="大肥鱼 · 傲娇鲸鱼娘", font=("Microsoft YaHei UI", 16, "bold")).pack(side="left")
-        ttk.Label(header, text="  状态：").pack(side="left", padx=(12, 0))
-        self.status_label = tk.Label(header, textvariable=self.status_var, fg="#b45309", font=("Microsoft YaHei UI", 10, "bold"))
-        self.status_label.pack(side="left")
+        self.root.columnconfigure(1, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main = tk.Frame(self.root, bg=BG)
+        main.grid(row=0, column=1, sticky="nsew")
+        main.columnconfigure(0, weight=1)
+        main.rowconfigure(1, weight=1)
+        self._build_header(main)
+        self.page_container = tk.Frame(main, bg=BG)
+        self.page_container.grid(row=1, column=0, sticky="nsew")
+        self.page_container.columnconfigure(0, weight=1)
+        self.page_container.rowconfigure(0, weight=1)
+        self.pages = {}
+        self._build_basic_page()
+        self._build_model_page()
+        self._build_persona_page()
+        self._build_meme_page()
+        self._build_sticker_page()
+        self._build_run_page()
+        self._build_log_page()
+        self._build_sidebar()
+        self.show_page("basic")
 
-        self.start_btn = ttk.Button(header, text="启动接管", command=self.start_bot)
-        self.start_btn.pack(side="right", padx=4)
-        self.stop_btn = ttk.Button(header, text="退出接管", command=self.stop_bot)
-        self.stop_btn.pack(side="right", padx=4)
-        self.restart_btn = ttk.Button(header, text="重启接管", command=self.restart_bot)
-        self.restart_btn.pack(side="right", padx=4)
-        ttk.Button(header, text="保存配置", command=self.save_settings_ui).pack(side="right", padx=4)
-        ttk.Button(header, text="打开目录", command=lambda: os.startfile(PROJECT_DIR)).pack(side="right", padx=4)
+    def _build_header(self, parent):
+        header = tk.Frame(parent, bg=BG)
+        header.grid(row=0, column=0, sticky="ew", padx=30, pady=(22, 14))
+        left = tk.Frame(header, bg=BG)
+        left.pack(side="left", fill="x", expand=True)
+        self.page_title_var = tk.StringVar(value="基础设置")
+        self.page_subtitle_var = tk.StringVar(value="")
+        ttk.Label(left, textvariable=self.page_title_var, style="PageTitle.TLabel").pack(anchor="w")
+        ttk.Label(left, textvariable=self.page_subtitle_var, style="PageSub.TLabel").pack(anchor="w", pady=(2, 0))
 
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=12, pady=(0, 6))
-        self._build_basic_tab()
-        self._build_model_tab()
-        self._build_persona_tab()
-        self._build_meme_tab()
-        self._build_sticker_tab()
-        self._build_run_tab()
-        self._build_log()
+        right = tk.Frame(header, bg=BG)
+        right.pack(side="right")
+        self.status_label = tk.Label(
+            right,
+            textvariable=self.status_var,
+            bg="#E9F0FA",
+            fg="#4A6484",
+            font=(FONT_NAME, 9, "bold"),
+            padx=12,
+            pady=6,
+        )
+        self.status_label.pack(side="left", padx=(0, 14))
+        self.start_btn = ttk.Button(right, text="启动接管", style="Accent.TButton", command=self.start_bot)
+        self.start_btn.pack(side="left", padx=4)
+        self.stop_btn = ttk.Button(right, text="退出接管", style="Danger.TButton", command=self.stop_bot)
+        self.stop_btn.pack(side="left", padx=4)
+        self.restart_btn = ttk.Button(right, text="重启", style="Ghost.TButton", command=self.restart_bot)
+        self.restart_btn.pack(side="left", padx=4)
+        ttk.Button(right, text="保存", style="Ghost.TButton", command=self.save_settings_ui).pack(side="left", padx=4)
 
-    def _entry(self, parent, row, key, label, width=36, show=None, col=0):
-        ttk.Label(parent, text=label).grid(row=row, column=col, sticky="w", padx=8, pady=4)
+    def _build_sidebar(self):
+        side = tk.Frame(self.root, bg=SIDEBAR, width=214)
+        side.grid(row=0, column=0, sticky="nsew")
+        side.grid_propagate(False)
+        tk.Frame(side, bg=AQUA, height=3).pack(fill="x")
+
+        brand = tk.Frame(side, bg=SIDEBAR)
+        brand.pack(fill="x", padx=20, pady=(22, 8))
+        tk.Label(
+            brand,
+            text="大肥鱼",
+            font=(FONT_NAME, 21, "bold"),
+            fg="#FFFFFF",
+            bg=SIDEBAR,
+        ).pack(anchor="w")
+        tk.Label(
+            brand,
+            text="傲娇鲸鱼娘 · AI 助手",
+            font=(FONT_NAME, 9),
+            fg="#8FB3D9",
+            bg=SIDEBAR,
+        ).pack(anchor="w", pady=(2, 0))
+        wave = tk.Canvas(brand, width=172, height=26, bg=SIDEBAR, highlightthickness=0)
+        wave.pack(anchor="w", pady=(10, 0))
+        wave.create_line(
+            0, 18, 22, 8, 44, 18, 66, 8, 88, 18, 110, 8, 132, 18, 154, 8, 172, 18,
+            fill=AQUA,
+            width=2,
+            smooth=True,
+        )
+
+        tk.Label(
+            side,
+            text="功能",
+            font=(FONT_NAME, 8, "bold"),
+            fg="#6E8BA8",
+            bg=SIDEBAR,
+        ).pack(anchor="w", padx=22, pady=(18, 6))
+        self.nav_buttons = {}
+        for key, label in NAV_ITEMS:
+            btn = ttk.Button(
+                side,
+                text=label,
+                style="Nav.TButton",
+                command=lambda k=key: self.show_page(k),
+            )
+            btn.pack(fill="x", padx=10, pady=2)
+            self.nav_buttons[key] = btn
+
+        footer = tk.Frame(side, bg=SIDEBAR)
+        footer.pack(side="bottom", fill="x", padx=20, pady=18)
+        tk.Label(
+            footer,
+            text="配置保存后\n点「重启」生效",
+            font=(FONT_NAME, 8),
+            fg="#6E8BA8",
+            bg=SIDEBAR,
+            justify="left",
+        ).pack(anchor="w")
+        tk.Button(
+            footer,
+            text="打开项目目录",
+            font=(FONT_NAME, 8),
+            fg="#8FB3D9",
+            bg=SIDEBAR,
+            activebackground=SIDEBAR_ACTIVE,
+            activeforeground="#FFFFFF",
+            bd=0,
+            relief="flat",
+            cursor="hand2",
+            command=lambda: os.startfile(PROJECT_DIR),
+        ).pack(anchor="w", pady=(8, 0))
+
+    def show_page(self, key):
+        page = self.pages[key]
+        page.tkraise()
+        self.root.unbind_all("<MouseWheel>")
+        for name, button in self.nav_buttons.items():
+            button.configure(style="NavActive.TButton" if name == key else "Nav.TButton")
+        title, subtitle = PAGE_META[key]
+        self.page_title_var.set(title)
+        self.page_subtitle_var.set(subtitle)
+
+    def _new_scroll_page(self, key):
+        page = ScrollFrame(self.page_container)
+        page.grid(row=0, column=0, sticky="nsew")
+        self.pages[key] = page
+        return page.inner
+
+    def _new_page(self, key):
+        page = tk.Frame(self.page_container, bg=BG)
+        page.grid(row=0, column=0, sticky="nsew")
+        self.pages[key] = page
+        return page
+
+    def _card(self, parent, title, subtitle=None, wide=False):
+        outer = tk.Frame(parent, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
+        outer.pack(fill="x", padx=18, pady=(0, 14))
+        inner = tk.Frame(outer, bg=CARD)
+        inner.pack(fill="x", padx=18, pady=14)
+        ttk.Label(inner, text=title, style="CardTitle.TLabel").grid(
+            row=0, column=0, columnspan=4, sticky="w"
+        )
+        row = 1
+        if subtitle:
+            ttk.Label(
+                inner,
+                text=subtitle,
+                style="Hint.TLabel",
+                wraplength=720,
+                justify="left",
+            ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(2, 8))
+            row = 2
+        inner.columnconfigure(1, weight=1)
+        if wide:
+            inner.columnconfigure(3, weight=1)
+        return inner, row
+
+    def _actions(self, parent):
+        row = tk.Frame(parent, bg=BG)
+        row.pack(fill="x", padx=18, pady=(0, 16))
+        return row
+
+    def _spacer(self, parent):
+        tk.Frame(parent, bg=BG, height=8).pack(fill="x")
+
+    def _entry(self, parent, row, key, label, width=30, show=None, col=0, span=1):
+        ttk.Label(parent, text=label, style="Field.TLabel").grid(
+            row=row, column=col, sticky="w", padx=(0, 10), pady=6
+        )
         var = tk.StringVar()
         ttk.Entry(parent, textvariable=var, width=width, show=show).grid(
-            row=row, column=col + 1, sticky="we", padx=8, pady=4
+            row=row, column=col + 1, columnspan=span, sticky="we", padx=(0, 16), pady=6
         )
         self.v[key] = var
 
-    def _check(self, parent, row, key, label, columnspan=2, col=0):
+    def _check(self, parent, row, key, label, columnspan=4, col=0):
         var = tk.BooleanVar()
-        ttk.Checkbutton(parent, text=label, variable=var).grid(
-            row=row, column=col, columnspan=columnspan, sticky="w", padx=8, pady=3
-        )
+        ttk.Checkbutton(
+            parent, text=label, variable=var, style="Card.TCheckbutton"
+        ).grid(row=row, column=col, columnspan=columnspan, sticky="w", padx=(0, 10), pady=4)
         self.b[key] = var
 
     def _combo(self, parent, row, key, label, values, col=0):
-        ttk.Label(parent, text=label).grid(row=row, column=col, sticky="w", padx=8, pady=4)
-        var = tk.StringVar()
-        ttk.Combobox(parent, textvariable=var, values=values, state="readonly", width=33).grid(
-            row=row, column=col + 1, sticky="we", padx=8, pady=4
+        ttk.Label(parent, text=label, style="Field.TLabel").grid(
+            row=row, column=col, sticky="w", padx=(0, 10), pady=6
         )
+        var = tk.StringVar()
+        ttk.Combobox(
+            parent, textvariable=var, values=values, state="readonly", width=28
+        ).grid(row=row, column=col + 1, sticky="we", padx=(0, 16), pady=6)
         self.v[key] = var
 
-    def _text(self, parent, row, key, label, height=6):
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="nw", padx=8, pady=4)
-        box = ttk.Frame(parent)
-        box.grid(row=row, column=1, sticky="nsew", padx=8, pady=4)
-        text = tk.Text(box, height=height, wrap="word", undo=True)
+    def _text(self, parent, row, key, label, height=6, span=3):
+        ttk.Label(parent, text=label, style="Field.TLabel").grid(
+            row=row, column=0, sticky="nw", padx=(0, 10), pady=6
+        )
+        box = tk.Frame(parent, bg=CARD)
+        box.grid(row=row, column=1, columnspan=span, sticky="nsew", padx=(0, 16), pady=6)
+        text = tk.Text(
+            box,
+            height=height,
+            wrap="word",
+            undo=True,
+            bg="#FBFDFF",
+            fg=TEXT,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=BORDER,
+            highlightcolor=PRIMARY,
+            font=(FONT_NAME, 10),
+            padx=8,
+            pady=6,
+        )
         scroll = ttk.Scrollbar(box, orient="vertical", command=text.yview)
         text.configure(yscrollcommand=scroll.set)
         text.pack(side="left", fill="both", expand=True)
@@ -431,167 +802,334 @@ class AssistantApp:
         self.t[key] = text
         return text
 
-    def _build_basic_tab(self):
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="基础")
-        tab.columnconfigure(0, weight=1)
-        tab.columnconfigure(1, weight=1)
+    def _build_basic_page(self):
+        page = self._new_scroll_page("basic")
+        card, row = self._card(
+            page,
+            "群与身份",
+            "群名要和微信里一字不差；群昵称和登录昵称用来确认是机器人小号。",
+            wide=True,
+        )
+        self._text(card, row, "GROUPS", "群名（每行一个）", 4, span=3)
+        row += 1
+        self._entry(card, row, "BOT_NAMES", "群昵称（逗号分隔）", span=3)
+        row += 1
+        self._entry(card, row, "EXPECTED_ACCOUNT", "登录昵称校验", span=3)
+        row += 1
 
-        left = ttk.LabelFrame(tab, text="群和触发")
-        left.grid(row=0, column=0, sticky="nsew", padx=(8, 4), pady=8)
-        left.columnconfigure(1, weight=1)
-        self._text(left, 0, "GROUPS", "群名（每行一个）", 4)
-        self._entry(left, 1, "BOT_NAMES", "群昵称（逗号分隔）")
-        self._entry(left, 2, "EXPECTED_ACCOUNT", "登录昵称校验")
-        self._combo(left, 3, "TRIGGER_MODE", "触发方式", ["smart", "at_or_keyword", "at"])
-        self._entry(left, 4, "KEYWORDS", "关键词（逗号分隔）")
-        self._check(left, 5, "TRIGGER_BY_NAME", "叫名字（不带 @）也触发")
-        self._entry(left, 6, "FOLLOW_UP_SECONDS", "追问窗口（秒）")
-        self._entry(left, 7, "FOLLOW_UP_TURNS", "最多追问轮数")
-        self._entry(left, 8, "FOLLOW_UP_HINTS", "追问信号（逗号分隔）")
-
-        right = ttk.LabelFrame(tab, text="回复和图片")
-        right.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
-        right.columnconfigure(1, weight=1)
-        self._entry(right, 0, "MAX_REPLY_CHARS", "单条回复字数上限")
-        self._entry(right, 1, "CONTEXT_SIZE", "上下文条数")
-        self._entry(right, 2, "MIN_INTERVAL", "同群回复间隔（秒）")
-        self._entry(right, 3, "EMPTY_AT_REPLY", "只叫它不说话时")
-        self._check(right, 4, "REPLY_WITH_AT", "明确 @ 时回复带 @")
-        self._entry(right, 5, "IMAGE_FOLLOW_SECONDS", "先叫再发图（秒）")
-        self._entry(right, 6, "IMAGE_WAIT_SECONDS", "等图时间（秒）")
-        self._check(right, 7, "AUTO_CAPTURE_IMAGE_KEY", "图片密钥缺失时自动抓")
+        card, row = self._card(
+            page,
+            "触发与追问",
+            "叫名字、关键词、@，或者刚聊完接着问，都能触发。",
+            wide=True,
+        )
+        self._combo(card, row, "TRIGGER_MODE", "触发方式", ["smart", "at_or_keyword", "at"])
+        self._entry(card, row, "KEYWORDS", "关键词（逗号分隔）", col=2)
+        row += 1
+        self._check(card, row, "TRIGGER_BY_NAME", "叫名字（不带 @）也触发")
+        row += 1
+        self._entry(card, row, "FOLLOW_UP_SECONDS", "追问窗口（秒）")
+        self._entry(card, row, "FOLLOW_UP_TURNS", "最多追问轮数", col=2)
+        row += 1
+        self._entry(card, row, "FOLLOW_UP_HINTS", "追问信号（逗号分隔）", span=3)
+        row += 1
         ttk.Label(
-            right,
-            text="smart：叫名字/关键词/追问都能触发；at_or_keyword：只认名字和关键词；at：只认 @。",
-            wraplength=430,
-            foreground="#666666",
-        ).grid(row=8, column=0, columnspan=2, sticky="w", padx=8, pady=(8, 4))
+            card,
+            text="smart：名字/关键词/追问都接；at_or_keyword：名字和关键词；at：只认 @。",
+            style="Hint.TLabel",
+            wraplength=720,
+        ).grid(row=row, column=0, columnspan=4, sticky="w", pady=(2, 2))
 
-    def _build_model_tab(self):
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="模型")
-        tab.columnconfigure(1, weight=1)
-        self._entry(tab, 0, "LLM_BASE_URL", "接口地址")
-        self._entry(tab, 1, "LLM_API_KEY", "API Key", show="*")
-        self._entry(tab, 2, "LLM_MODEL", "文本模型")
-        self._entry(tab, 3, "LLM_TIMEOUT", "超时（秒）")
-        self._entry(tab, 4, "LLM_TEMPERATURE", "温度 0-2")
-        self._check(tab, 5, "ENABLE_VISION", "启用图片/表情包识别")
-        self._entry(tab, 6, "VISION_BASE_URL", "视觉接口（留空同上方）")
-        self._entry(tab, 7, "VISION_API_KEY", "视觉 Key（留空同上方）", show="*")
-        self._entry(tab, 8, "VISION_MODEL", "视觉模型")
-        buttons = ttk.Frame(tab)
-        buttons.grid(row=9, column=0, columnspan=2, sticky="w", padx=8, pady=10)
-        ttk.Button(buttons, text="测试文本模型", command=lambda: self.run_cli("--test-llm", "测试文本模型", True)).pack(side="left", padx=4)
-        ttk.Button(buttons, text="测试视觉模型", command=lambda: self.run_cli("--test-vision", "测试视觉模型", True)).pack(side="left", padx=4)
-        ttk.Label(
-            tab,
-            text="换智谱/通义/Kimi 时改接口地址、模型名和 Key。视觉模型默认 deepseek-flash。",
-            wraplength=760,
-            foreground="#666666",
-        ).grid(row=10, column=0, columnspan=2, sticky="w", padx=8, pady=4)
+        card, row = self._card(
+            page,
+            "回复与图片",
+            "默认简洁；需要步骤时最多 5 条、300 字。",
+            wide=True,
+        )
+        self._entry(card, row, "MAX_REPLY_CHARS", "回复字数上限")
+        self._entry(card, row, "CONTEXT_SIZE", "上下文条数", col=2)
+        row += 1
+        self._entry(card, row, "MIN_INTERVAL", "同群回复间隔（秒）")
+        self._entry(card, row, "EMPTY_AT_REPLY", "只叫它不说话时", col=2)
+        row += 1
+        self._check(card, row, "REPLY_WITH_AT", "明确 @ 时回复带 @")
+        row += 1
+        self._entry(card, row, "IMAGE_FOLLOW_SECONDS", "先叫再发图（秒）")
+        self._entry(card, row, "IMAGE_WAIT_SECONDS", "等图时间（秒）", col=2)
+        row += 1
+        self._check(card, row, "AUTO_CAPTURE_IMAGE_KEY", "图片密钥缺失时自动抓")
+        self._spacer(page)
 
-    def _build_persona_tab(self):
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="人设")
-        tab.columnconfigure(0, weight=1)
-        tab.rowconfigure(1, weight=1)
+    def _build_model_page(self):
+        page = self._new_scroll_page("model")
+        card, row = self._card(
+            page,
+            "文本模型",
+            "OpenAI 兼容接口；换服务商时改地址、模型名和 Key。",
+            wide=True,
+        )
+        self._entry(card, row, "LLM_BASE_URL", "接口地址", span=3)
+        row += 1
+        self._entry(card, row, "LLM_API_KEY", "API Key", show="*", span=3)
+        row += 1
+        self._entry(card, row, "LLM_MODEL", "文本模型")
+        self._entry(card, row, "LLM_TIMEOUT", "超时（秒）", col=2)
+        row += 1
+        self._entry(card, row, "LLM_TEMPERATURE", "温度 0-2")
+
+        card, row = self._card(
+            page,
+            "视觉模型",
+            "图片和群友表情包识别；留空则和文本模型共用地址与 Key。",
+            wide=True,
+        )
+        self._check(card, row, "ENABLE_VISION", "启用图片 / 表情包识别")
+        row += 1
+        self._entry(card, row, "VISION_BASE_URL", "视觉接口（留空同上）", span=3)
+        row += 1
+        self._entry(card, row, "VISION_API_KEY", "视觉 Key（留空同上）", show="*", span=3)
+        row += 1
+        self._entry(card, row, "VISION_MODEL", "视觉模型")
+
+        card, row = self._card(page, "连接测试", "保存当前配置后，用小请求检查接口是否正常。")
+        ttk.Button(
+            card,
+            text="测试文本模型",
+            style="Ghost.TButton",
+            command=lambda: self.run_cli("--test-llm", "测试文本模型", True),
+        ).grid(row=row, column=0, sticky="w", pady=(0, 4))
+        ttk.Button(
+            card,
+            text="测试视觉模型",
+            style="Ghost.TButton",
+            command=lambda: self.run_cli("--test-vision", "测试视觉模型", True),
+        ).grid(row=row, column=1, sticky="w", pady=(0, 4))
+        self._spacer(page)
+
+    def _build_persona_page(self):
+        page = self._new_page("persona")
+        card = tk.Frame(page, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
+        card.pack(fill="both", expand=True, padx=18, pady=(0, 16))
+        head = tk.Frame(card, bg=CARD)
+        head.pack(fill="x", padx=18, pady=(14, 4))
+        ttk.Label(head, text="人设文本", style="CardTitle.TLabel").pack(side="left")
+        ttk.Button(
+            head,
+            text="重新载入文件",
+            style="Ghost.TButton",
+            command=self.reload_persona,
+        ).pack(side="right")
         ttk.Label(
-            tab,
-            text="以 # 开头的行会被忽略；不要写花括号。改完保存，重启接管后生效。",
-            foreground="#666666",
-        ).grid(row=0, column=0, sticky="w", padx=8, pady=6)
-        box = ttk.Frame(tab)
-        box.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
-        text = tk.Text(box, wrap="word", undo=True)
+            card,
+            text="以 # 开头的行会被忽略；不要写花括号。保存后点「重启接管」生效。",
+            style="Hint.TLabel",
+        ).pack(anchor="w", padx=18)
+        box = tk.Frame(card, bg=CARD)
+        box.pack(fill="both", expand=True, padx=18, pady=(8, 18))
+        text = tk.Text(
+            box,
+            wrap="word",
+            undo=True,
+            bg="#FBFDFF",
+            fg=TEXT,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=BORDER,
+            highlightcolor=PRIMARY,
+            font=(FONT_NAME, 10),
+            padx=10,
+            pady=8,
+        )
         scroll = ttk.Scrollbar(box, orient="vertical", command=text.yview)
         text.configure(yscrollcommand=scroll.set)
         text.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
         self.t["PERSONA"] = text
 
-    def _build_meme_tab(self):
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="热梗")
-        tab.columnconfigure(1, weight=1)
-        tab.columnconfigure(3, weight=1)
-        self._check(tab, 0, "MEME_ENABLE", "启用联网热梗语料", 4)
-        self._entry(tab, 1, "MEME_REFRESH_HOURS", "更新间隔（小时）", width=18, col=0)
-        self._entry(tab, 1, "MEME_PROMPT_LIMIT", "进入提示词条数", width=18, col=2)
-        self._entry(tab, 2, "MEME_PER_REFRESH", "每轮最多新增", width=18, col=0)
-        self._entry(tab, 2, "MEME_AI_RATIO", "AI 梗占比 0-1", width=18, col=2)
-        self._entry(tab, 3, "MEME_MAX_ITEMS", "库内最多保留", width=18, col=0)
-        self._entry(tab, 3, "MEME_TTL_DAYS", "多少天没出现淘汰", width=18, col=2)
-        self._entry(tab, 4, "MEME_SOURCE_LIMIT", "普通热榜每源条数", width=18, col=0)
-        self._entry(tab, 4, "MEME_AI_SOURCE_LIMIT", "AI 源每源条数", width=18, col=2)
-        buttons = ttk.Frame(tab)
-        buttons.grid(row=5, column=0, columnspan=4, sticky="w", padx=8, pady=10)
-        ttk.Button(buttons, text="立即更新热梗", command=self.update_memes).pack(side="left", padx=4)
-        ttk.Button(buttons, text="查看当前语料", command=lambda: self.run_cli("--show-memes", "当前热梗语料", False)).pack(side="left", padx=4)
-        ttk.Label(
-            tab,
-            text="热梗面向 20 岁左右、优先 AI 相关；更新后需要重启接管才会进入提示词。",
-            wraplength=780,
-            foreground="#666666",
-        ).grid(row=6, column=0, columnspan=4, sticky="w", padx=8, pady=4)
-
-    def _build_sticker_tab(self):
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="表情包")
-        tab.columnconfigure(1, weight=1)
-        tab.columnconfigure(3, weight=1)
-        self._entry(tab, 0, "STICKER_CHANCE", "闲聊后补表情概率 0-1")
-        self._entry(tab, 1, "STICKER_MAX_REPLY_CHARS", "超过多少字不补")
-        self._check(tab, 2, "REACT_TO_STICKERS", "识别群友发的表情包", 4)
-        self._entry(tab, 3, "STICKER_REACT_CHANCE", "没在聊时接梗概率 0-1")
-        self._entry(tab, 4, "STICKER_MIN_INTERVAL", "两次接梗最小间隔（秒）")
-        ttk.Label(tab, textvariable=self.sticker_count_var, foreground="#666666").grid(
-            row=5, column=0, columnspan=4, sticky="w", padx=8, pady=6
+    def _build_meme_page(self):
+        page = self._new_scroll_page("meme")
+        card, row = self._card(
+            page,
+            "更新与注入",
+            "面向 20 岁左右、优先 AI 相关；更新会花一次小模型请求。",
+            wide=True,
         )
-        buttons = ttk.Frame(tab)
-        buttons.grid(row=6, column=0, columnspan=4, sticky="w", padx=8, pady=6)
-        ttk.Button(buttons, text="打开表情包文件夹", command=self.open_stickers).pack(side="left", padx=4)
-        ttk.Button(buttons, text="刷新数量", command=self.update_sticker_count).pack(side="left", padx=4)
-        ttk.Label(
-            tab,
-            text="识别会截图，微信窗口会短暂恢复约 1 秒；需要视觉模型可用。",
-            wraplength=780,
-            foreground="#666666",
-        ).grid(row=7, column=0, columnspan=4, sticky="w", padx=8, pady=4)
+        self._check(card, row, "MEME_ENABLE", "启用联网热梗语料")
+        row += 1
+        self._entry(card, row, "MEME_REFRESH_HOURS", "更新间隔（小时）")
+        self._entry(card, row, "MEME_PROMPT_LIMIT", "进入提示词条数", col=2)
+        row += 1
+        self._entry(card, row, "MEME_PER_REFRESH", "每轮最多新增")
+        self._entry(card, row, "MEME_AI_RATIO", "AI 梗占比 0-1", col=2)
+        row += 1
 
-    def _build_run_tab(self):
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="运行")
-        tab.columnconfigure(1, weight=1)
-        tab.columnconfigure(3, weight=1)
-        ttk.Checkbutton(tab, text="打开 APP 时自动启动接管", variable=self.auto_start_var).grid(
-            row=0, column=0, columnspan=4, sticky="w", padx=8, pady=4
+        card, row = self._card(
+            page,
+            "语料库",
+            "旧梗会自动淘汰；只保留最近一段时间还在出现的说法。",
+            wide=True,
         )
-        self._check(tab, 1, "PAUSE_WHEN_ACTIVE", "用电脑时暂停", 2, col=0)
-        self._check(tab, 1, "PAUSE_READ_WHEN_ACTIVE", "用电脑时连消息也不读", 2, col=2)
-        self._entry(tab, 2, "ACTIVE_IDLE_SECONDS", "空闲多少秒后恢复", width=18, col=0)
-        self._entry(tab, 2, "POLL_INTERVAL", "检查间隔（秒）", width=18, col=2)
-        self._check(tab, 3, "PAUSE_WHEN_FULLSCREEN", "全屏游戏/视频时暂停", 4)
-        self._check(tab, 4, "HIDE_WECHAT_WINDOW", "窗口移到屏幕外发送", 2, col=0)
-        self._check(tab, 4, "LOW_PRIORITY", "降低进程优先级", 2, col=2)
-        self._check(tab, 5, "ONLY_WHEN_UNREAD", "只处理有未读的群", 2, col=0)
-        self._check(tab, 5, "KEEP_WINDOW_WIDE", "启动时临时拉宽窗口", 2, col=2)
-        ttk.Label(
-            tab,
-            text="两个“用电脑时暂停”开关任意一个打开都会暂停；都关掉才会边用电脑边回。",
-            wraplength=780,
-            foreground="#666666",
-        ).grid(row=6, column=0, columnspan=4, sticky="w", padx=8, pady=8)
+        self._entry(card, row, "MEME_MAX_ITEMS", "库内最多保留")
+        self._entry(card, row, "MEME_TTL_DAYS", "多少天没出现淘汰", col=2)
+        row += 1
+        self._entry(card, row, "MEME_SOURCE_LIMIT", "普通热榜每源条数")
+        self._entry(card, row, "MEME_AI_SOURCE_LIMIT", "AI 源每源条数", col=2)
+        row += 1
 
-    def _build_log(self):
-        frame = ttk.LabelFrame(self.root, text="运行日志")
-        frame.pack(fill="both", expand=False, padx=12, pady=(0, 10))
-        self.log_text = tk.Text(frame, height=10, wrap="word", state="disabled", background="#111827", foreground="#d1d5db")
-        scroll = ttk.Scrollbar(frame, orient="vertical", command=self.log_text.yview)
+        actions = self._actions(page)
+        ttk.Button(
+            actions,
+            text="立即更新热梗",
+            style="Accent.TButton",
+            command=self.update_memes,
+        ).pack(side="left")
+        ttk.Button(
+            actions,
+            text="查看当前语料",
+            style="Ghost.TButton",
+            command=lambda: self.run_cli("--show-memes", "当前热梗语料", False),
+        ).pack(side="left", padx=(8, 0))
+        ttk.Label(
+            actions,
+            text="更新后需要重启接管才会进入提示词。",
+            style="PageSub.TLabel",
+        ).pack(side="left", padx=(14, 0))
+        self._spacer(page)
+
+    def _build_sticker_page(self):
+        page = self._new_scroll_page("sticker")
+        card, row = self._card(
+            page,
+            "自然发送",
+            "普通闲聊回完有概率补一张；正经报错、配置类长回答不补。",
+            wide=True,
+        )
+        self._entry(card, row, "STICKER_CHANCE", "闲聊后补表情概率 0-1")
+        self._entry(card, row, "STICKER_MAX_REPLY_CHARS", "超过多少字不补", col=2)
+        row += 1
+
+        card, row = self._card(
+            page,
+            "识别群友表情包",
+            "正在跟它聊或刚问过它时，会截图识别；窗口会短暂恢复约 1 秒。",
+            wide=True,
+        )
+        self._check(card, row, "REACT_TO_STICKERS", "识别群友发的表情包")
+        row += 1
+        self._entry(card, row, "STICKER_REACT_CHANCE", "没在聊时接梗概率 0-1")
+        self._entry(card, row, "STICKER_MIN_INTERVAL", "两次接梗最小间隔（秒）", col=2)
+        row += 1
+
+        card, row = self._card(
+            page,
+            "素材库",
+            "文件名用「标签_xxx.png」，标签决定发哪一类表情。",
+            wide=True,
+        )
+        ttk.Label(
+            card,
+            textvariable=self.sticker_count_var,
+            style="Hint.TLabel",
+        ).grid(row=row, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        row += 1
+        ttk.Button(
+            card,
+            text="打开表情包文件夹",
+            style="Ghost.TButton",
+            command=self.open_stickers,
+        ).grid(row=row, column=0, sticky="w")
+        ttk.Button(
+            card,
+            text="刷新数量",
+            style="Ghost.TButton",
+            command=self.update_sticker_count,
+        ).grid(row=row, column=1, sticky="w", padx=(8, 0))
+        self._spacer(page)
+
+    def _build_run_page(self):
+        page = self._new_scroll_page("run")
+        card, row = self._card(
+            page,
+            "启动行为",
+            "打开 APP 时自动接管；关闭窗口会退出接管并恢复微信窗口。",
+        )
+        ttk.Checkbutton(
+            card,
+            text="打开 APP 时自动启动接管",
+            variable=self.auto_start_var,
+            style="Card.TCheckbutton",
+        ).grid(row=row, column=0, columnspan=4, sticky="w", pady=4)
+        row += 1
+
+        card, row = self._card(
+            page,
+            "暂停策略",
+            "两个开关任意一个打开都会暂停；都关掉才会边用电脑边回。",
+            wide=True,
+        )
+        self._check(card, row, "PAUSE_WHEN_ACTIVE", "用电脑时暂停", 2, col=0)
+        self._check(card, row, "PAUSE_READ_WHEN_ACTIVE", "用电脑时连消息也不读", 2, col=2)
+        row += 1
+        self._entry(card, row, "ACTIVE_IDLE_SECONDS", "空闲多少秒后恢复")
+        self._entry(card, row, "POLL_INTERVAL", "检查间隔（秒）", col=2)
+        row += 1
+        self._check(card, row, "PAUSE_WHEN_FULLSCREEN", "全屏游戏 / 视频时暂停")
+        row += 1
+
+        card, row = self._card(
+            page,
+            "窗口与性能",
+            "窗口移到屏幕外发送，回复不弹窗；全屏时可自动暂停。",
+            wide=True,
+        )
+        self._check(card, row, "HIDE_WECHAT_WINDOW", "窗口移到屏幕外发送", 2, col=0)
+        self._check(card, row, "LOW_PRIORITY", "降低进程优先级", 2, col=2)
+        row += 1
+        self._check(card, row, "ONLY_WHEN_UNREAD", "只处理有未读的群", 2, col=0)
+        self._check(card, row, "KEEP_WINDOW_WIDE", "启动时临时拉宽窗口", 2, col=2)
+        self._spacer(page)
+
+    def _build_log_page(self):
+        page = self._new_page("log")
+        card = tk.Frame(page, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
+        card.pack(fill="both", expand=True, padx=18, pady=(0, 16))
+        head = tk.Frame(card, bg=CARD)
+        head.pack(fill="x", padx=18, pady=(14, 6))
+        ttk.Label(head, text="实时日志", style="CardTitle.TLabel").pack(side="left")
+        ttk.Button(
+            head,
+            text="打开日志文件",
+            style="Ghost.TButton",
+            command=self.open_log,
+        ).pack(side="right")
+        box = tk.Frame(card, bg="#0F172A")
+        box.pack(fill="both", expand=True, padx=18, pady=(0, 18))
+        self.log_text = tk.Text(
+            box,
+            wrap="word",
+            state="disabled",
+            bg="#0F172A",
+            fg="#DCE7F5",
+            insertbackground="#DCE7F5",
+            relief="flat",
+            font=("Consolas", 9),
+            padx=10,
+            pady=8,
+        )
+        scroll = ttk.Scrollbar(box, orient="vertical", command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scroll.set)
         self.log_text.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+
+    def reload_persona(self):
+        self.t["PERSONA"].delete("1.0", "end")
+        self.t["PERSONA"].insert("1.0", read_text(PERSONA_FILE, ""))
+
+    def open_log(self):
+        if os.path.exists(LOG_FILE):
+            os.startfile(LOG_FILE)
+        else:
+            messagebox.showinfo("还没有日志", "启动接管后才会生成日志。")
 
     def _set_var(self, key, value):
         if key in self.b:
@@ -700,8 +1238,15 @@ class AssistantApp:
     def _set_status(self, text, color="#b45309"):
         self.status_var.set(text)
         self.status_changed_at = time.time()
+        palette = {
+            "#15803d": ("#E7F7EF", SUCCESS),
+            "#b91c1c": ("#FDECEC", DANGER),
+            "#b45309": ("#FFF4E5", WARN),
+            "#6b7280": ("#E9F0FA", "#4A6484"),
+        }
+        bg, fg = palette.get(color, ("#E9F0FA", "#4A6484"))
         try:
-            self.status_label.configure(fg=color)
+            self.status_label.configure(bg=bg, fg=fg)
         except Exception:
             pass
 
