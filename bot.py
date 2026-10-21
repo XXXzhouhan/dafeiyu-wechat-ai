@@ -392,28 +392,19 @@ class Bot:
     @staticmethod
     def looks_like_followup(text):
         text = (text or "").strip()
-        if not text or len(text) > 120:
+        if not text or len(text) > 300:
             return False
         if text.startswith(("http://", "https://")):
             return False
-        if "?" in text or "？" in text:
-            return True
-        if text.startswith(
-            ("那", "这", "然后", "还有", "继续", "所以", "可是", "但是", "不过", "不对", "不是")
-        ):
-            return True
-        hints = getattr(config, "FOLLOW_UP_HINTS", [])
-        for hint in hints:
-            if hint == "你":
-                if "你" in text and len(text) <= 40:
-                    return True
-                continue
-            if hint and hint in text:
-                return True
-        return False
+        if text in {
+            "好", "好的", "嗯", "哦", "行", "可以", "收到", "谢谢", "哈哈", "哈",
+            "666", "牛", "厉害", "ok", "OK",
+        }:
+            return False
+        return True
 
     def is_follow_up(self, state, sender_wxid, text):
-        if config.TRIGGER_MODE != "smart" or state is None:
+        if state is None:
             return False
         if state.follow_left <= 0 or not state.last_bot_sender:
             return False
@@ -421,6 +412,9 @@ class Bot:
             return False
         seconds = float(getattr(config, "FOLLOW_UP_SECONDS", 0) or 0)
         if seconds <= 0 or time.time() - state.last_bot_at > seconds:
+            return False
+        text = (text or "").strip()
+        if text.startswith("@") and not self.is_at_me(text):
             return False
         return self.looks_like_followup(text)
 
@@ -1027,7 +1021,16 @@ class Bot:
                         continue
 
                 if not question:
-                    if config.EMPTY_AT_REPLY:
+                    seconds = float(getattr(config, "FOLLOW_UP_SECONDS", 0) or 0)
+                    recent = bool(state.last_bot_at) and (
+                        time.time() - state.last_bot_at <= seconds
+                    )
+                    if recent:
+                        state.follow_left = max(
+                            state.follow_left,
+                            int(getattr(config, "FOLLOW_UP_TURNS", 3) or 0),
+                        )
+                    elif config.EMPTY_AT_REPLY:
                         self.say(
                             name,
                             config.EMPTY_AT_REPLY,
@@ -1263,6 +1266,7 @@ class Bot:
             log.info("[dry-run] -> %s", text)
             state.last_bot_at = time.time()
             state.last_bot_sender = sender_wxid or ""
+            state.follow_left = int(getattr(config, "FOLLOW_UP_TURNS", 3) or 0)
             return True
 
         for attempt in (1, 2):
@@ -1271,6 +1275,7 @@ class Bot:
                     log.info("已回复")
                     state.last_bot_at = time.time()
                     state.last_bot_sender = sender_wxid or ""
+                    state.follow_left = int(getattr(config, "FOLLOW_UP_TURNS", 3) or 0)
                     return True
                 log.warning("发送失败（第 %d 次）", attempt)
             except Exception:
