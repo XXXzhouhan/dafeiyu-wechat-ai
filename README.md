@@ -395,9 +395,9 @@ python bot.py --fix-window         # 激活 UIA 并恢复微信窗口
 - 不要在 Issue / PR 里贴 API Key、微信群二维码、聊天记录或其他隐私信息
 - 如果你曾经把 `.env` 提交或分享出去，请立刻到模型平台吊销并更换 Key
 
-## 11. 关键词
+## 11. 关键词（方便搜索）
 
-微信群机器人 · 微信 AI 助手 · 微信自动回复 · 微信小号 · 群聊机器人 · 大肥鱼 · 鲸鱼娘 · DeepSeek · OpenAI 兼容接口 · 大模型 · LLM · AI 人设 · 表情包 · 图片识别 · 视觉模型 · 网络热梗 · 微信 4.0 / WeChat 4.x · SQLCipher · UIAutomation · Windows 自动化 · RPA · Python · 开源免费
+**中文**：微信群机器人、微信群 AI、微信 AI 助手、微信自动回复、微信自动接话、微信自动回消息、微信小号、微信小号托管、微信群托管、群聊机器人、群聊 AI、群聊搭子、AI 群友、赛博群友、电子群友、群宠机器人、AI 群宠、微信群 AI 成员、微信助手、微信 4.0 机器人、微信 4.1.15、微信机器人框架、微信数据库解密、SQLCipher、UIAutomation、Windows 微信自动化、桌面自动化、RPA、无 OCR、后台发送、不弹窗、表情包机器人、热梗机器人、图片识别、视觉问答、人设扮演、人设机器人、傲娇、鲸鱼娘、大肥鱼、蓝色大肥鱼、DeepSeek、深度求索、智谱、GLM、通义千问、Qwen、Kimi、Ollama、OpenAI 兼容、大模型、LLM、聊天机器人、AI 搭子、开源免费
 
-English: WeChat bot, WeChat AI assistant, WeChat group chatbot, WeChat auto reply, WeChat automation, WeChat robot, DeepSeek bot, LLM chatbot, AI companion, OpenAI-compatible, Windows desktop automation, UIAutomation, SQLCipher, RPA, Python bot.
+**English**: WeChat bot, WeChat AI, WeChat AI assistant, WeChat group bot, WeChat group chatbot, WeChat auto reply, WeChat auto responder, WeChat automation, WeChat robot, WeChat desktop automation, WeChat 4.x bot, WeChat 4.1.15, WeChat AI member, AI group member, AI companion, AI friend, group chat bot, group chat AI, group chat companion, chatbot, LLM bot, DeepSeek bot, DeepSeek chat, OpenAI-compatible, GLM, Qwen, Kimi, Ollama, SQLCipher, UIAutomation, Windows automation, RPA, Python bot, sticker bot, meme bot, vision chatbot, persona bot, roleplay bot, Chinese chatbot, open source WeChat bot.
 
