@@ -1,0 +1,3 @@
+wechatauto-replica>=1.2.7.0
+requests>=2.31
+Pillow>=10.0

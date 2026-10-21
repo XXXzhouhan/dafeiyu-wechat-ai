@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 本地密钥与配置（由 setup / APP 生成，禁止提交）
+.env
+config_local.py
+app_state.json
+
+# 运行产物
+*.log
+bot.pid
+bot.stop
+media_cache/
+check.log
+memes.json
+
+# 表情包图片为第三方作品，仓库只保留说明与标签模板，图片自备
+stickers/*.png
+stickers/*.jpg
+stickers/*.jpeg
+stickers/*.gif
+stickers/*.webp
+stickers/_excluded/
+stickers/INDEX.md
+stickers/retag_log.tsv
+# 原项目表情包来源记录，仅本地保留
+stickers/CREDITS.md
+
+# 其他
+*.zip
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
