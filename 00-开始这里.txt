@@ -2,7 +2,7 @@
 ================================
 
 【三步跑起来】
-1. git clone 或下载 ZIP 解压到电脑，建议放 D:\wechat-group-ai
+1. git clone 或下载 ZIP 解压到电脑，建议放 D:\dafeiyu-wechat-ai
 2. 双击 setup.bat，按提示装依赖、登录微信小号、填群名/昵称/API Key
 3. 双击 启动助手.bat，打开桌面 APP，它会自动启动接管
 4. 在群里发：大肥鱼 你好（不用 @ 也行）

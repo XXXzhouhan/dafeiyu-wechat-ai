@@ -1,4 +1,4 @@
-# 大肥鱼 · 微信群 AI 助手
+# 大肥鱼 · 微信群 AI 助手 (WeChat Group AI Bot)
 
 在 Windows 上跑一个属于你的微信群 AI 成员：用微信小号登录，读取本地数据库的新消息，被叫到、@ 或接着追问时调用 DeepSeek 回复，再用 UIA 把回复发回群里。
 
@@ -32,7 +32,7 @@
 
 ## 3. 第一次部署
 
-1. `git clone https://github.com/XXXzhouhan/wechat-group-ai.git`，或下载 ZIP 解压，建议放 `D:\wechat-group-ai`
+1. `git clone https://github.com/XXXzhouhan/dafeiyu-wechat-ai.git`，或下载 ZIP 解压，建议放 `D:\dafeiyu-wechat-ai`
 2. 双击 **`setup.bat`**，按提示完成：
    - 安装 Python 依赖（`wechatauto-replica` 等）
    - 安装/登录微信 4.1.12+
@@ -394,4 +394,10 @@ python bot.py --fix-window         # 激活 UIA 并恢复微信窗口
 - 本项目与腾讯、DeepSeek 及其关联公司无隶属、合作或背书关系，“微信”“DeepSeek”等名称仅用于说明调用对象
 - 不要在 Issue / PR 里贴 API Key、微信群二维码、聊天记录或其他隐私信息
 - 如果你曾经把 `.env` 提交或分享出去，请立刻到模型平台吊销并更换 Key
+
+## 11. 关键词
+
+微信群机器人 · 微信 AI 助手 · 微信自动回复 · 微信小号 · 群聊机器人 · 大肥鱼 · 鲸鱼娘 · DeepSeek · OpenAI 兼容接口 · 大模型 · LLM · AI 人设 · 表情包 · 图片识别 · 视觉模型 · 网络热梗 · 微信 4.0 / WeChat 4.x · SQLCipher · UIAutomation · Windows 自动化 · RPA · Python · 开源免费
+
+English: WeChat bot, WeChat AI assistant, WeChat group chatbot, WeChat auto reply, WeChat automation, WeChat robot, DeepSeek bot, LLM chatbot, AI companion, OpenAI-compatible, Windows desktop automation, UIAutomation, SQLCipher, RPA, Python bot.
 
