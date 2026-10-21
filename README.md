@@ -2,7 +2,7 @@
 
 在 Windows 上跑一个属于你的微信群 AI 成员：用微信小号登录，读取本地数据库的新消息，被叫到、@ 或接着追问时调用 DeepSeek 回复，再用 UIA 把回复发回群里。
 
-不需要 OCR，也不会一直轮询微信界面；回复时微信窗口在屏幕外后台发送，不会弹出来。
+不需要 OCR，也不会一直轮询微信界面；回复时微信窗口在屏幕外后台发送，不会弹出来。切换不同群/私聊时会短暂拉回窗口约 0.2-0.5 秒再移走。
 
 > 首次启动/首次发送会往 `Weixin.dll` 内存写一个无障碍字节，并读取本地数据库密钥。这是第三方改动，不是官方接口，有微信风控/封号风险，请务必用小号。
 
@@ -120,6 +120,29 @@ FOLLOW_UP_BLOCK_ON_OTHER = True  # 群里别人插话后，结束当前自动追
 
 想回到只在被 @ 时回复，把 `TRIGGER_MODE` 改成 `"at"`。
 
+### 5.2.1 多个群 + 私聊
+
+`GROUPS` 本来就可以填多个群；私聊单独用 `PRIVATE_CHATS`：
+
+```python
+GROUPS = ["群A", "群B"]
+PRIVATE_CHATS = ["张三", "李四", "wxid_xxxxxxxx"]
+PRIVATE_TRIGGER_MODE = "all"
+PRIVATE_CONTEXT_SIZE = 300   # 私聊单独带更长上下文
+```
+
+- 每个群、每个私聊都有独立上下文，互不串线
+- 私聊默认带最近 300 条，群聊仍按 `CONTEXT_SIZE`（默认 60，当前本地配置 100）
+- 私聊回复不会带 @；群里只有明确 @ 才带 @
+- 私聊默认 `all`：对方每条消息都回（「嗯 / 好的 / 谢谢」这类短确认跳过）
+- `smart`：先在私聊里叫它名字/关键词，之后才接追问
+- `keyword`：只在叫名字/关键词时回
+- 私聊名字可以填备注、昵称或 `wxid`；同名联系人建议填 `wxid`。不确定名字先运行 `python bot.py --list-sessions`
+- 群和私聊可以同时监听；所有发送仍共用同一个微信窗口
+- 切换会话时会短暂把微信窗口拉回屏幕内（约 0.2-0.5 秒）再移走；同一个会话连续回复不会闪
+- 不填 `PRIVATE_CHATS` = 不监听私聊，避免乱回
+- 私聊收到图片会直接看；群里的图片仍按原来的“先问图/截图再等图”逻辑
+
 ### 5.3 模型和 Key
 
 `.env`（由 `configure.py` 生成，也可以直接改）：
@@ -158,13 +181,14 @@ SEARCH_MAX_REPLY_CHARS = 700 # 带来源的搜索回答最多多少字
 ### 5.4 上下文和回复
 
 ```python
-CONTEXT_SIZE = 60          # 带最近 60 条消息做上下文
+CONTEXT_SIZE = 60          # 群聊带最近 60 条消息
+PRIVATE_CONTEXT_SIZE = 300 # 私聊单独带更长上下文
 MAX_REPLY_CHARS = 300      # 单条回复最多字数
 MIN_INTERVAL = 5.0         # 同群两次回复最小间隔（秒）
 IMAGE_FOLLOW_SECONDS = 60  # 先叫它再发图，多少秒内算同一次提问
 ```
 
-默认按“简洁”回答：闲聊 1 句，普通问题 2-3 句，复杂问题最多 5 条、300 字。带联网来源的回答放宽到 700 字（含链接），避免把来源截掉。上下文越大越懂前因后果，但 token 费用和延迟也会涨；数据库读取本身很便宜，瓶颈在模型和搜索。
+默认按“简洁”回答：闲聊 1 句，普通问题 2-3 句，复杂问题最多 5 条、300 字。带联网来源的回答放宽到 700 字（含链接），避免把来源截掉。私聊默认带 300 条上下文，群聊带 `CONTEXT_SIZE` 条；上下文越大越懂前因后果，但 token 费用和延迟也会涨，私聊连续聊很久后可以适当调小。
 
 ### 5.5 别打扰你
 
@@ -176,7 +200,7 @@ LOW_PRIORITY = True             # 机器人进程降优先级
 HIDE_WECHAT_WINDOW = True       # 窗口移到屏幕外，回复不弹窗
 ```
 
-想边用电脑边让它回消息，把 `PAUSE_WHEN_ACTIVE` 和 `PAUSE_READ_WHEN_ACTIVE` 都改成 `False`（安装向导默认就是关的）。回复仍然在后台发送，不会弹出聊天框，只是会短暂借一下输入焦点（约 0.2 秒）再还给你；全屏游戏/视频仍会暂停。怕被打扰就把这两项改回 `True`。
+想边用电脑边让它回消息，把 `PAUSE_WHEN_ACTIVE` 和 `PAUSE_READ_WHEN_ACTIVE` 都改成 `False`（安装向导默认就是关的）。回复仍然在后台发送，不会弹出聊天框，只是会短暂借一下输入焦点（约 0.2 秒）再还给你；切换群/私聊时会短暂把窗口拉回屏幕内约 0.2-0.5 秒。全屏游戏/视频仍会暂停。怕被打扰就把这两项改回 `True`。
 
 ### 5.6 图片识别
 
@@ -342,6 +366,9 @@ python bot.py --fix-window         # 激活 UIA 并恢复微信窗口
 **一定要 @ 吗？**
 不用。默认 `TRIGGER_MODE = "smart"`：叫「大肥鱼 / 鲸鱼娘 / 蓝鱼 / 鱼鱼 / 小助手」，或者刚聊完接着追问，都能触发。只有你明确 @ 它时，回复才会带 @。
 
+**能同时监听多个群和私聊吗？**
+可以。`GROUPS` 里填多个群；`PRIVATE_CHATS` 里填要私聊的人（备注/昵称/wxid），`PRIVATE_TRIGGER_MODE = "all"` 就会一对一回复。每个会话独立上下文，私聊回复不带 @；不填私聊列表就不会监听私聊。
+
 **聊到一半不 @ 会接吗？**
 会，但不会每句都接。机器人回完后 120 秒内，同一个人继续追问时，它先判断这句话是在对它说，还是在对群里别人说；确认是接它的话才回。群里别人插话、你叫了别人名字/@别人、或者像群聊感慨，它就自动结束追问，不抢话；想继续就重新 @/叫它。你 @ 它但没带问题，它不会回「有什么问题」，会等你把话说完；纯「嗯/好的/谢谢」不接。
 
@@ -391,7 +418,7 @@ python bot.py --fix-window         # 激活 UIA 并恢复微信窗口
 只有你明确 @ 它时，回复才带 `@昵称`；叫名字、关键词、追问都不带。带的是纯文本，不是微信里可点击的蓝色 mention。
 
 **回复时会弹出聊天框吗？**
-不会。窗口会移到所有显示器之外，回复在后台发送；只会短暂借一下键盘焦点（约 0.2 秒）再还回去。把 `HIDE_WECHAT_WINDOW` 改成 `False` 就改回前台发送。
+不会。窗口会移到所有显示器之外，回复在后台发送；只会短暂借一下键盘焦点（约 0.2 秒）再还回去。切换不同群/私聊时，需要把窗口拉回屏幕内约 0.2-0.5 秒来打开目标会话，然后马上移走；同一个会话连续回复不会闪。把 `HIDE_WECHAT_WINDOW` 改成 `False` 就改回前台发送。
 
 **群友看到的头像/名字没变？**
 `persona.txt` 只改说话风格，不改微信资料。头像在微信「我」里改；群里显示的是**群昵称**，在群设置 → 我在本群的昵称里改。改完重进群或重启微信刷新缓存。如果连账号昵称也改了，记得把 `config.py` 的 `EXPECTED_ACCOUNT` 同步成新昵称。
@@ -420,7 +447,7 @@ python bot.py --fix-window         # 激活 UIA 并恢复微信窗口
 
 ## 11. 关键词（方便搜索）
 
-**中文**：微信群机器人、微信群 AI、微信 AI 助手、微信自动回复、微信自动接话、微信自动回消息、微信小号、微信小号托管、微信群托管、群聊机器人、群聊 AI、群聊搭子、AI 群友、赛博群友、电子群友、群宠机器人、AI 群宠、微信群 AI 成员、微信助手、微信 4.0 机器人、微信 4.1.15、微信机器人框架、微信数据库解密、SQLCipher、UIAutomation、Windows 微信自动化、桌面自动化、RPA、无 OCR、后台发送、不弹窗、表情包机器人、热梗机器人、图片识别、视觉问答、人设扮演、人设机器人、傲娇、鲸鱼娘、大肥鱼、蓝色大肥鱼、DeepSeek、深度求索、智谱、GLM、通义千问、Qwen、Kimi、Ollama、OpenAI 兼容、大模型、LLM、聊天机器人、AI 搭子、开源免费
+**中文**：微信群机器人、微信群 AI、微信 AI 助手、微信自动回复、微信自动接话、微信自动回消息、微信小号、微信小号托管、微信群托管、群聊机器人、群聊 AI、群聊搭子、微信私聊机器人、私聊自动回复、多群监听、多群管理、微信多开、AI 群友、赛博群友、电子群友、群宠机器人、AI 群宠、微信群 AI 成员、微信助手、微信 4.0 机器人、微信 4.1.15、微信机器人框架、微信数据库解密、SQLCipher、UIAutomation、Windows 微信自动化、桌面自动化、RPA、无 OCR、后台发送、不弹窗、表情包机器人、热梗机器人、图片识别、视觉问答、人设扮演、人设机器人、傲娇、鲸鱼娘、大肥鱼、蓝色大肥鱼、DeepSeek、深度求索、智谱、GLM、通义千问、Qwen、Kimi、Ollama、OpenAI 兼容、大模型、LLM、聊天机器人、AI 搭子、开源免费
 
-**English**: WeChat bot, WeChat AI, WeChat AI assistant, WeChat group bot, WeChat group chatbot, WeChat auto reply, WeChat auto responder, WeChat automation, WeChat robot, WeChat desktop automation, WeChat 4.x bot, WeChat 4.1.15, WeChat AI member, AI group member, AI companion, AI friend, group chat bot, group chat AI, group chat companion, chatbot, LLM bot, DeepSeek bot, DeepSeek chat, OpenAI-compatible, GLM, Qwen, Kimi, Ollama, SQLCipher, UIAutomation, Windows automation, RPA, Python bot, sticker bot, meme bot, vision chatbot, persona bot, roleplay bot, Chinese chatbot, open source WeChat bot.
+**English**: WeChat bot, WeChat AI, WeChat AI assistant, WeChat group bot, WeChat group chatbot, WeChat auto reply, WeChat auto responder, WeChat automation, WeChat robot, WeChat desktop automation, WeChat 4.x bot, WeChat 4.1.15, WeChat AI member, AI group member, AI companion, AI friend, group chat bot, group chat AI, group chat companion, WeChat private chat bot, WeChat DM bot, multi-group monitoring, chatbot, LLM bot, DeepSeek bot, DeepSeek chat, OpenAI-compatible, GLM, Qwen, Kimi, Ollama, SQLCipher, UIAutomation, Windows automation, RPA, Python bot, sticker bot, meme bot, vision chatbot, persona bot, roleplay bot, Chinese chatbot, open source WeChat bot.
 

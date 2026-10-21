@@ -299,8 +299,8 @@ def _seq(row):
 
 
 class GroupState:
-    def __init__(self):
-        self.history = deque(maxlen=config.CONTEXT_SIZE)
+    def __init__(self, context_size=None):
+        self.history = deque(maxlen=context_size or config.CONTEXT_SIZE)
         self.last_seq = None
         self.last_reply = 0.0
         self.recent_at = {}
@@ -313,6 +313,7 @@ class GroupState:
         self.follow_left = 0
         self.follow_interrupted = False
         self.last_sticker_at = 0.0
+        self.is_group = True
 
 
 class Bot:
@@ -360,18 +361,45 @@ class Bot:
 
         all_groups = {g.get("name"): g.get("username") for g in (db.get_groups() or [])}
         self.groups = {}
+        missing = []
         for name in config.GROUPS:
             username = all_groups.get(name)
             if username:
                 self.groups[name] = username
             else:
-                log.error("数据库里找不到群「%s」", name)
-        if not self.groups:
-            raise RuntimeError("没有可监听的群")
+                missing.append(name)
+                log.info("群「%s」不存在，尝试按私聊联系人解析", name)
+        self.nick_cache = {}
+        self.private_chats = self.load_private_chats(missing)
+        if not self.groups and not self.private_chats:
+            raise RuntimeError("没有可监听的群或私聊")
 
         self.other_names = self.load_other_names()
-        self.nick_cache = {}
-        self.states = {name: GroupState() for name in self.groups}
+        self.chats = {}
+        for name, username in self.groups.items():
+            self.chats[username] = {
+                "name": name,
+                "username": username,
+                "target": name,
+                "is_group": True,
+            }
+        for username, name in self.private_chats.items():
+            self.chats[username] = {
+                "name": name,
+                "username": username,
+                "target": username,
+                "is_group": False,
+            }
+        self.states = {}
+        for key, meta in self.chats.items():
+            context_size = (
+                int(getattr(config, "PRIVATE_CONTEXT_SIZE", 300) or 300)
+                if not meta["is_group"]
+                else config.CONTEXT_SIZE
+            )
+            state = GroupState(context_size)
+            state.is_group = meta["is_group"]
+            self.states[key] = state
         self.stickers = self.load_stickers()
         self.sticker_groups = self.load_sticker_groups()
         if self.stickers:
@@ -405,6 +433,73 @@ class Bot:
                         names.add(name)
         log.info("群成员称呼：%d 个（用来避开叫别人）", len(names))
         return sorted(names, key=len, reverse=True)
+
+    def load_private_chats(self, extra_entries=()):
+        raw = getattr(config, "PRIVATE_CHATS", []) or []
+        if isinstance(raw, str):
+            raw = [raw]
+        entries = [str(item).strip() for item in list(raw) + list(extra_entries)]
+        entries = [item for item in entries if item]
+        entries = list(dict.fromkeys(entries))
+        if not entries:
+            return {}
+        try:
+            mapping = self.db.nickname_map() or {}
+        except Exception:
+            mapping = {}
+        by_name = {}
+        for wxid, name in mapping.items():
+            if (
+                not name
+                or wxid == self.self_wxid
+                or str(wxid).endswith("@chatroom")
+            ):
+                continue
+            by_name.setdefault(name, wxid)
+
+        out = {}
+        for entry in entries:
+            if entry.endswith("@chatroom"):
+                log.error("私聊配置「%s」是群号，请放进 GROUPS", entry)
+                continue
+            username = entry if entry in mapping else by_name.get(entry, "")
+            if not username:
+                try:
+                    rows = self.db.search_contact(entry) or []
+                except Exception:
+                    rows = []
+                rows = [
+                    row
+                    for row in rows
+                    if row.get("username")
+                    and row.get("username") != self.self_wxid
+                    and not str(row.get("username")).endswith("@chatroom")
+                ]
+                chosen = next(
+                    (
+                        row
+                        for row in rows
+                        if entry
+                        in (
+                            (row.get("remark") or "").strip(),
+                            (row.get("nick_name") or "").strip(),
+                        )
+                    ),
+                    rows[0] if rows else None,
+                )
+                if chosen:
+                    username = chosen.get("username") or ""
+            if not username:
+                log.error("数据库里找不到私聊联系人「%s」", entry)
+                continue
+            try:
+                name = mapping.get(username) or self.db.get_nickname(username) or entry
+            except Exception:
+                name = entry
+            name = str(name).strip() or entry
+            out[username] = name
+            log.info("监听私聊：%s（%s）", name, username)
+        return out
 
     def is_other_addressed(self, text):
         text = (text or "").strip()
@@ -504,6 +599,8 @@ class Bot:
             return ""
         if text.lower() in FOLLOW_UP_ACKS:
             return ""
+        if state is not None and not state.is_group:
+            return "AI"
         if self.is_other_addressed(text):
             return "OTHER"
         if state is not None and state.follow_interrupted:
@@ -928,10 +1025,17 @@ class Bot:
         return norm(text.lstrip("\r\n"))
 
     def warm_up(self):
-        for name, username in self.groups.items():
-            rows = self.db.get_messages(username, limit=max(config.CONTEXT_SIZE, 20)) or []
+        for key, meta in self.chats.items():
+            name = meta["name"]
+            username = meta["username"]
+            context_size = (
+                int(getattr(config, "PRIVATE_CONTEXT_SIZE", 300) or 300)
+                if not meta["is_group"]
+                else config.CONTEXT_SIZE
+            )
+            rows = self.db.get_messages(username, limit=max(context_size, 20)) or []
             rows.sort(key=_seq)
-            state = self.states[name]
+            state = self.states[key]
             for row in rows:
                 if row.get("type") != "文本":
                     continue
@@ -1035,7 +1139,7 @@ class Bot:
         if state.follow_interrupted:
             return False
         text = (text or "").strip()
-        if text.startswith("@") and not self.is_at_me(text):
+        if state.is_group and text.startswith("@") and not self.is_at_me(text):
             self.end_followup(state, "在 @ 别人")
             return False
         verdict = self.followup_decision(state, self.sender_name(sender_wxid), text)
@@ -1057,6 +1161,23 @@ class Bot:
         if self.is_follow_up(state, sender_wxid, text):
             return "follow"
         return ""
+
+    def private_trigger_reason(self, state, sender_wxid, text):
+        text = (text or "").strip()
+        if not text:
+            return ""
+        mode = getattr(config, "PRIVATE_TRIGGER_MODE", "all")
+        if mode == "smart":
+            if self.is_name_trigger(text) or self.is_keyword_trigger(text):
+                return "keyword"
+            return "follow" if self.is_follow_up(state, sender_wxid, text) else ""
+        if mode == "keyword":
+            if self.is_name_trigger(text) or self.is_keyword_trigger(text):
+                return "keyword"
+            return ""
+        if text.lower() in FOLLOW_UP_ACKS:
+            return ""
+        return "private"
 
     def should_trigger(self, text):
         return bool(self.trigger_reason(text))
@@ -1129,6 +1250,95 @@ class Bot:
         clean = re.sub(r"\[表情[:：]\s*[^\]]+\]", "", text).strip()
         return tag, clean
 
+    def chat_name(self, target):
+        return self.private_chats.get(target, target)
+
+    def select_session(self, name):
+        from wechatauto.uia_driver import SESSION_LIST_AIDS, _aid_hit, _find_by
+
+        if not name or not self.uia.ensure_window():
+            return False
+        win = self.uia._win
+        if win is None:
+            return False
+        session_list = _find_by(
+            win,
+            lambda c: _aid_hit(getattr(c, "AutomationId", ""), SESSION_LIST_AIDS),
+            max_depth=30,
+        )
+        if session_list is None:
+            try:
+                self.uia.back_to_chat_tab(require_list=True)
+            except Exception:
+                pass
+            win = self.uia._win
+            if win is None:
+                return False
+            session_list = _find_by(
+                win,
+                lambda c: _aid_hit(getattr(c, "AutomationId", ""), SESSION_LIST_AIDS),
+                max_depth=30,
+            )
+        if session_list is None:
+            return False
+        for cell in session_list.GetChildren():
+            text = (cell.Name or "").split("\n", 1)[0].strip()
+            if text != name and not text.startswith(name):
+                continue
+            clicked = False
+            try:
+                clicked = bool(self.uia._click_ctrl(cell))
+            except Exception:
+                clicked = False
+            if not clicked:
+                try:
+                    cell.GetSelectionItemPattern().Select()
+                except Exception:
+                    return False
+            time.sleep(0.25)
+            try:
+                current = self.uia.current_chat()
+            except Exception:
+                current = None
+            if current == name or (current and current.startswith(name)):
+                return True
+            try:
+                cell.GetSelectionItemPattern().Select()
+            except Exception:
+                return False
+            time.sleep(0.25)
+            try:
+                current = self.uia.current_chat()
+            except Exception:
+                current = None
+            return current == name or bool(current and current.startswith(name))
+        return False
+
+    def open_chat(self, target):
+        if not target:
+            return False
+        if self.hidden:
+            self.restore_window()
+            time.sleep(0.15)
+        name = self.private_chats.get(target, "") if target in self.private_chats else ""
+        try:
+            current = self.uia.current_chat()
+            if current == target or (name and current == name):
+                return True
+        except Exception:
+            pass
+        if name:
+            if self.select_session(name):
+                return True
+            if self.uia.open_chat(name):
+                return True
+            return False
+        if not str(target).startswith("wxid_") and self.select_session(target):
+            return True
+        if self.uia.open_chat(target):
+            return True
+        return False
+
     def send_attachment(self, group, path):
         try:
             win = self.uia._win
@@ -1139,10 +1349,10 @@ class Bot:
             if win is None:
                 return False
 
-            if self.uia.current_chat() != group:
-                if not self.uia.open_chat(group):
+            if self.uia.current_chat() != self.chat_name(group):
+                if not self.open_chat(group):
                     return False
-                time.sleep(0.3)
+                time.sleep(0.15)
                 win = self.uia._win
                 if win is None:
                     return False
@@ -1317,10 +1527,10 @@ class Bot:
         try:
             if not self.uia.ensure_window():
                 return None
-            if self.uia.current_chat() != group:
-                if not self.uia.open_chat(group):
+            if self.uia.current_chat() != self.chat_name(group):
+                if not self.open_chat(group):
                     return None
-                time.sleep(0.5)
+                time.sleep(0.2)
             found = self.uia.find_in_message_list(
                 lambda cls, name: name == "动画表情"
                 or (cls == "mmui::ChatBubbleItemView" and "[动画表情" in name),
@@ -1365,6 +1575,8 @@ class Bot:
                     pass
 
     def sticker_in_conversation(self, state, sender_wxid):
+        if not state.is_group:
+            return True
         if (
             state.follow_left > 0
             and state.last_bot_sender == sender_wxid
@@ -1522,9 +1734,20 @@ class Bot:
                 state.history.append((self.bot_name, "[表情]" + tag))
 
     def poll_once(self):
-        for name, username in self.groups.items():
-            state = self.states[name]
-            rows = self.db.get_messages(username, limit=max(100, config.CONTEXT_SIZE)) or []
+        for chat_key, meta in self.chats.items():
+            name = meta["name"]
+            username = meta["username"]
+            target = meta["target"]
+            is_group = meta["is_group"]
+            context_size = (
+                int(getattr(config, "PRIVATE_CONTEXT_SIZE", 300) or 300)
+                if not is_group
+                else config.CONTEXT_SIZE
+            )
+            state = self.states[chat_key]
+            rows = self.db.get_messages(
+                username, limit=max(100, context_size)
+            ) or []
             if not rows:
                 continue
             rows.sort(key=_seq)
@@ -1539,7 +1762,8 @@ class Bot:
                 sender = self.sender_name(sender_wxid)
 
                 if (
-                    getattr(config, "FOLLOW_UP_BLOCK_ON_OTHER", True)
+                    is_group
+                    and getattr(config, "FOLLOW_UP_BLOCK_ON_OTHER", True)
                     and sender_wxid != self.self_wxid
                     and state.follow_left > 0
                     and state.last_bot_sender
@@ -1560,20 +1784,34 @@ class Bot:
                     conversing = self.sticker_in_conversation(state, sender_wxid)
                     if conversing:
                         state.follow_left = max(0, state.follow_left - 1)
-                    self.handle_sticker(name, sender, state, sender_wxid, conversing)
+                    self.handle_sticker(target, sender, state, sender_wxid, conversing)
                     continue
 
                 if "图片" in mtype:
                     if sender_wxid == self.self_wxid:
                         continue
                     now = time.time()
+                    if not is_group:
+                        state.pending_image.pop(sender_wxid, None)
+                        state.last_image = None
+                        self.handle_image(
+                            target,
+                            username,
+                            row,
+                            sender,
+                            "",
+                            state,
+                            sender_wxid,
+                            False,
+                        )
+                        continue
                     state.pending_image[sender_wxid] = (row, now)
                     state.last_image = (row, now, sender_wxid)
                     if now - state.recent_at.get(sender_wxid, 0) <= config.IMAGE_FOLLOW_SECONDS:
                         state.pending_image.pop(sender_wxid, None)
                         state.last_image = None
                         self.handle_image(
-                            name,
+                            target,
                             username,
                             row,
                             sender,
@@ -1596,7 +1834,8 @@ class Bot:
                     continue
 
                 if (
-                    getattr(config, "FOLLOW_UP_BLOCK_ON_OTHER", True)
+                    is_group
+                    and getattr(config, "FOLLOW_UP_BLOCK_ON_OTHER", True)
                     and state.follow_left > 0
                     and state.last_bot_sender
                     and sender_wxid != state.last_bot_sender
@@ -1606,7 +1845,10 @@ class Bot:
                 ):
                     self.interrupt_followup(state, f"{sender} 插话")
 
-                reason = self.trigger_reason(text, sender_wxid, state)
+                if is_group:
+                    reason = self.trigger_reason(text, sender_wxid, state)
+                else:
+                    reason = self.private_trigger_reason(state, sender_wxid, text)
                 if not reason:
                     continue
                 if reason == "follow":
@@ -1618,7 +1860,7 @@ class Bot:
                 now = time.time()
                 state.recent_at[sender_wxid] = now
                 state.recent_question[sender_wxid] = question
-                mention = reason == "at" and config.REPLY_WITH_AT
+                mention = is_group and reason == "at" and config.REPLY_WITH_AT
 
                 if self.wants_sticker(question):
                     tag = next((t for t in self.stickers if t in question), "")
@@ -1626,7 +1868,7 @@ class Bot:
                         tag = next((g for g in self.sticker_groups if g in question), "")
                     if not tag and "恶搞" in question:
                         tag = "搞笑"
-                    if self.send_sticker(name, tag, sender, state):
+                    if self.send_sticker(target, tag, sender, state):
                         self.note_bot_reply(state, sender_wxid, "[表情]")
                     state.history.append((sender, ("[表情]" + (tag or ""))))
                     continue
@@ -1637,7 +1879,7 @@ class Bot:
                         state.pending_image.pop(sender_wxid, None)
                         state.last_image = None
                         self.handle_image(
-                            name, username, pending[0], sender, question, state, sender_wxid, mention
+                            target, username, pending[0], sender, question, state, sender_wxid, mention
                         )
                         continue
                     state.pending_image.pop(sender_wxid, None)
@@ -1650,7 +1892,7 @@ class Bot:
                 ):
                     state.last_image = None
                     self.handle_image(
-                        name, username, last[0], sender, question, state, sender_wxid, mention
+                        target, username, last[0], sender, question, state, sender_wxid, mention
                     )
                     continue
 
@@ -1660,7 +1902,7 @@ class Bot:
                         state.last_image = None
                         state.last_seq = max(state.last_seq, _seq(found))
                         self.handle_image(
-                            name, username, found, sender, question, state, sender_wxid, mention
+                            target, username, found, sender, question, state, sender_wxid, mention
                         )
                         continue
 
@@ -1677,7 +1919,7 @@ class Bot:
                         )
                     elif config.EMPTY_AT_REPLY:
                         self.say(
-                            name,
+                            target,
                             config.EMPTY_AT_REPLY,
                             sender,
                             state,
@@ -1689,7 +1931,7 @@ class Bot:
                 if question in ("重置", "/reset", "#重置"):
                     state.history.clear()
                     self.say(
-                        name,
+                        target,
                         "上下文已清空",
                         sender,
                         state,
@@ -1717,14 +1959,14 @@ class Bot:
                 answer = self.finalize_answer(raw_answer, sources, used_search)
                 tag, answer = self.extract_sticker(answer)
                 if not answer:
-                    if tag and self.send_sticker(name, tag, sender, state, quiet=True):
+                    if tag and self.send_sticker(target, tag, sender, state, quiet=True):
                         self.note_bot_reply(state, sender_wxid, "[表情]")
                         state.history.append((self.bot_name, "[表情]" + tag))
                     continue
 
                 state.history.append((self.bot_name, answer))
                 sent = self.say(
-                    name,
+                    target,
                     answer,
                     sender,
                     state,
@@ -1739,7 +1981,7 @@ class Bot:
                     sticker_tag = self.pick_sticker_tag(answer)
                 if sticker_tag:
                     time.sleep(random.uniform(0.6, 1.2))
-                    if self.send_sticker(name, sticker_tag, sender, state, quiet=True):
+                    if self.send_sticker(target, sticker_tag, sender, state, quiet=True):
                         state.history.append((self.bot_name, "[表情]" + sticker_tag))
 
     def prepare_background(self):
@@ -1756,16 +1998,23 @@ class Bot:
             self.main_hwnd = win.NativeWindowHandle
             rect = win32gui.GetWindowRect(self.main_hwnd)
             w, h = rect[2] - rect[0], rect[3] - rect[1]
-            if rect[0] <= -30000 or w < 500 or h < 400:
-                self.orig_rect = (100, 80, 1100, 800)
+            user32 = ctypes.windll.user32
+            vx, vy = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
+            vw, vh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
+            on_screen = not (
+                rect[2] <= vx or rect[0] >= vx + vw
+                or rect[3] <= vy or rect[1] >= vy + vh
+            )
+            if not on_screen or w < 500 or h < 400:
+                self.orig_rect = (100, 80, 1200, 880)
             else:
                 self.orig_rect = rect
 
-            name = next(iter(self.groups))
+            target = next(iter(self.chats.values()))["target"]
             try:
-                if self.uia.current_chat() != name:
-                    self.uia.open_chat(name)
-                    time.sleep(0.3)
+                if self.uia.current_chat() != self.chat_name(target):
+                    self.open_chat(target)
+                    time.sleep(0.15)
             except Exception:
                 pass
 
@@ -1799,6 +2048,18 @@ class Bot:
             return
         try:
             x, y, right, bottom = self.orig_rect or (100, 80, 1200, 880)
+            user32 = ctypes.windll.user32
+            vx, vy = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
+            vw, vh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
+            if (
+                right - x < 500
+                or bottom - y < 400
+                or right <= vx
+                or x >= vx + vw
+                or bottom <= vy
+                or y >= vy + vh
+            ):
+                x, y, right, bottom = 100, 80, 1200, 880
             win32gui.MoveWindow(self.main_hwnd, x, y, right - x, bottom - y, True)
             win32gui.ShowWindow(self.main_hwnd, 5)
             self.hidden = False
@@ -1809,7 +2070,9 @@ class Bot:
     def _foreground_send(self, text, group):
         prev = win32gui.GetForegroundWindow()
         try:
-            ok = self.uia.send_text_to(text, group)
+            if not self.open_chat(group):
+                return False
+            ok = self.uia.send_text_to(text, self.uia.current_chat() or group)
         except Exception:
             log.error("前台发送异常:\n%s", traceback.format_exc())
             return False
@@ -1835,10 +2098,10 @@ class Bot:
             if win is None:
                 return self._foreground_send(text, group)
 
-            if self.uia.current_chat() != group:
-                if not self.uia.open_chat(group):
+            if self.uia.current_chat() != self.chat_name(group):
+                if not self.open_chat(group):
                     return self._foreground_send(text, group)
-                time.sleep(0.3)
+                time.sleep(0.1)
                 win = self.uia._win
                 if win is None:
                     return self._foreground_send(text, group)
@@ -1933,7 +2196,10 @@ class Bot:
             except OSError:
                 pass
             return
-        log.info("监听群：%s", "、".join(self.groups))
+        log.info(
+            "监听聊天：%s",
+            "、".join(meta["name"] for meta in self.chats.values()),
+        )
         log.info("检查间隔：%.1fs（数据库，不碰界面）", interval)
         self.prepare_background()
         self.start_meme_refresh()
@@ -2091,7 +2357,8 @@ def list_sessions(db):
     for row in db.get_sessions(limit=30) or []:
         username = row.get("username") or ""
         name = mapping.get(username) or username
-        log.info("%s | %s | 未读 %s", name, username, row.get("unread") or 0)
+        kind = "群" if username.endswith("@chatroom") else "私聊"
+        log.info("[%s] %s | %s | 未读 %s", kind, name, username, row.get("unread") or 0)
 
 
 def doctor(db, uia):
@@ -2099,7 +2366,15 @@ def doctor(db, uia):
     log.info("=" * 50)
     log.info("账号：%s（%s）", info.get("nick_name") or "?", info.get("username") or "?")
     log.info("数据库密钥：%d 个", len(getattr(db, "_keys", {}) or {}))
-    log.info("监听群：%s", "、".join(config.GROUPS))
+    log.info("监听群：%s", "、".join(config.GROUPS) or "无")
+    private_raw = config.PRIVATE_CHATS or []
+    if isinstance(private_raw, str):
+        private_raw = [private_raw]
+    log.info(
+        "监听私聊：%s（模式：%s）",
+        "、".join(str(x) for x in private_raw) or "无",
+        getattr(config, "PRIVATE_TRIGGER_MODE", "all"),
+    )
     log.info(
         "触发方式：%s（关键词：%s；追问 %s 秒 / %s 轮）",
         config.TRIGGER_MODE,
@@ -2286,8 +2561,8 @@ def main():
         doctor(db, uia)
         return
 
-    if not config.GROUPS or not config.BOT_NAMES:
-        log.error("请先在 config.py 里填好 GROUPS 和 BOT_NAMES")
+    if not (config.GROUPS or config.PRIVATE_CHATS) or not config.BOT_NAMES:
+        log.error("请先在 config.py 里填好 GROUPS 或 PRIVATE_CHATS，以及 BOT_NAMES")
         return
 
     if not _claim_pid():
